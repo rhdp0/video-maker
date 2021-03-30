@@ -1,11 +1,23 @@
 const algorithmia = require('algorithmia')
-const algorithmiaApiKey = require('../credentials/algorithmia.json').apiKey
 const senteceBoundaryDetection = require('sbd')
+
+const algorithmiaApiKey = require('../credentials/algorithmia.json').apiKey
+const watsonApiKey = require('../credentials/watson-nlu.json').apikey
+
+var NaturalLanguageUnderstandingV1 = require('watson-developer-cloud/natural-language-understanding/v1.js')
+ 
+var nlu = new NaturalLanguageUnderstandingV1({
+  iam_apikey: watsonApiKey,
+  version: '2018-04-05',
+  url: 'https://gateway.watsonplatform.net/natural-language-understanding/api/'
+});
 
 async function robot(content) {
     await fetchContentFromWikipedia(content) //Baixar conteúdo do Wikipedia
     sanitizeContent(content) //Limpar o conteúdo
     breakContentIntoSentence(content) //Quebrar em sentenças
+    limitMaximumSentences(content) //Definir limite máximo de sentenças
+    await fetchKeywordsOfAllSentences(content) //Preenche as keyword de cada sentença
 
     async function fetchContentFromWikipedia(content) {
         const algorithmiaAuthenticated = algorithmia(algorithmiaApiKey) // Gera uma instância autenticada
@@ -42,13 +54,44 @@ async function robot(content) {
     function breakContentIntoSentence(content) {
         content.sentences = []
 
-
         const sentences = senteceBoundaryDetection.sentences(content.sourceContentSanitize)
         sentences.forEach((sentences) => {
             content.sentences.push({
                 text: sentences,
                 keywords: [],
                 images: []
+            })
+        })
+    }
+
+    function limitMaximumSentences(content) {
+        content.sentences = content.sentences.slice(0, content.maximumSentences)
+    }
+
+    async function fetchKeywordsOfAllSentences(content) {
+        for (const sentence of content.sentences){
+            sentence.keyword = await fetchWatsonAndReturnKeywords(sentence.text)
+        }
+    }
+
+    async function fetchWatsonAndReturnKeywords(sentece) {
+        // Consulta as informações retornadas pelo Watson e engloba tudo em uma promise
+        return new Promise((resolve, reject) => {
+            nlu.analyze({
+                text: sentece,
+                features: {
+                    keywords: {}
+                }
+            }, (error, response) => {
+                if (error) {
+                    throw error
+                }
+    
+                const keywords = response.keywords.map((keyword) => {
+                    return keyword.text
+                })
+    
+                resolve(keywords)
             })
         })
     }
